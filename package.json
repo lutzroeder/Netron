@@ -17,7 +17,6 @@
         "server": "[ -d node_modules ] || npm install && python setup.py --quiet build && python -c 'import sys, os; sys.path.insert(0, os.path.join(\"dist\", \"lib\")); import netron; netron.main()' $@"
     },
     "dependencies": {
-        "d3": "7.0.0",
         "dagre": "0.8.5",
         "electron-updater": "4.3.9"
     },

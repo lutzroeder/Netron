@@ -99,14 +99,6 @@ host.ElectronHost = class {
                     request();
                 });
             }
-        }).then(() => {
-            // d3.js
-            const Module = require('module');
-            var d3 = new Module('', module.main);
-            const location = path.join(path.dirname(__dirname), 'node_modules', 'd3', 'dist', 'd3.js');
-            const source = fs.readFileSync(location, 'utf-8');
-            d3._compile(source, '');
-            global.d3 = d3.exports;
         });
     }
 

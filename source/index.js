@@ -26,7 +26,7 @@ host.BrowserHost = class {
         this._version = this._meta.version ? this._meta.version[0] : null;
         this._telemetry = this._version && this._version !== '0.0.0';
         this._environment = new Map();
-        this._environment.set('zoom', 'd3');
+        this._environment.set('zoom', 'drag');
         // this._environment.set('zoom', 'scroll');
     }
 

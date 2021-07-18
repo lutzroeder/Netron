@@ -10,7 +10,6 @@ import distutils.command.build
 
 node_dependencies = [
     ( 'netron', [
-        'node_modules/d3/dist/d3.js',
         'node_modules/dagre/dist/dagre.js'
       ]
     )

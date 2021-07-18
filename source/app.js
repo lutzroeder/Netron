@@ -48,7 +48,7 @@ class Application {
             event.returnValue = {
                 version: electron.app.getVersion(),
                 package: electron.app.isPackaged,
-                zoom: 'd3'
+                zoom: 'drag'
                 // zoom: 'scroll'
             };
         });

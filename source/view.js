@@ -110,7 +110,7 @@ view.View = class {
                     }
                     break;
                 }
-                case 'd3': {
+                case 'drag': {
                     this._getElementById('toolbar').addEventListener('mousewheel', (e) => {
                         this._preventZoom(e);
                     }, { passive: true });
@@ -232,9 +232,9 @@ view.View = class {
             case 'scroll':
                 this._updateZoom(this._zoom * 1.1);
                 break;
-            case 'd3':
+            case 'drag':
                 if (this._zoom) {
-                    this._zoom.scaleBy(d3.select(this._getElementById('canvas')), 1.2);
+                    this._zoom.scaleBy(1.2);
                 }
                 break;
         }
@@ -245,9 +245,9 @@ view.View = class {
             case 'scroll':
                 this._updateZoom(this._zoom * 0.9);
                 break;
-            case 'd3':
+            case 'drag':
                 if (this._zoom) {
-                    this._zoom.scaleBy(d3.select(this._getElementById('canvas')), 0.8);
+                    this._zoom.scaleBy(0.8);
                 }
                 break;
         }
@@ -258,9 +258,9 @@ view.View = class {
             case 'scroll':
                 this._updateZoom(1);
                 break;
-            case 'd3':
+            case 'drag':
                 if (this._zoom) {
-                    this._zoom.scaleTo(d3.select(this._getElementById('canvas')), 1);
+                    this._zoom.scaleTo(1);
                 }
                 break;
         }
@@ -323,7 +323,7 @@ view.View = class {
         if (selection && selection.length > 0) {
             const graphElement = this._getElementById('graph');
             switch (this._host.environment('zoom')) {
-                case 'd3': {
+                case 'drag': {
                     let x = 0;
                     let y = 0;
                     for (const element of selection) {
@@ -340,7 +340,7 @@ view.View = class {
                     y = y / selection.length;
                     const canvasElement = this._getElementById('canvas');
                     const canvasRect = canvasElement.getBoundingClientRect();
-                    this._zoom.transform(d3.select(canvasElement), d3.zoomIdentity.translate((canvasRect.width / 2) - x, (canvasRect.height / 2) - y));
+                    this._zoom.transform(view.Zoom.identity().translate((canvasRect.width / 2) - x, (canvasRect.height / 2) - y));
                     break;
                 }
                 case 'scroll': {
@@ -500,7 +500,7 @@ view.View = class {
                         canvasElement.style.position = 'static';
                         canvasElement.style.margin = 'auto';
                         break;
-                    case 'd3':
+                    case 'drag':
                         this._zoom = null;
                         canvasElement.style.position = 'absolute';
                         canvasElement.style.margin = '0';
@@ -630,7 +630,7 @@ view.View = class {
                 // https://stackoverflow.com/questions/40887193/d3-js-zoom-is-not-working-with-mousewheel-in-safari
                 const backgroundElement = this._host.document.createElementNS('http://www.w3.org/2000/svg', 'rect');
                 backgroundElement.setAttribute('id', 'background');
-                if (this._host.environment('zoom') === 'd3') {
+                if (this._host.environment('zoom') === 'drag') {
                     backgroundElement.setAttribute('width', '100%');
                     backgroundElement.setAttribute('height', '100%');
                 }
@@ -646,15 +646,14 @@ view.View = class {
 
                 let svg = null;
                 switch (this._host.environment('zoom')) {
-                    case 'd3': {
-                        svg = d3.select(canvasElement);
-                        this._zoom = d3.zoom();
-                        this._zoom(svg);
-                        this._zoom.scaleExtent([ 0.1, 1.4 ]);
+                    case 'drag': {
+                        svg = new view.Selection(canvasElement);
+                        this._zoom = new view.Zoom(svg);
+                        this._zoom.scaleExtent(0.1, 1.4);
                         this._zoom.on('zoom', (event) => {
                             originElement.setAttribute('transform', event.transform.toString());
                         });
-                        this._zoom.transform(svg, d3.zoomIdentity);
+                        this._zoom.transform(view.Zoom.identity());
                         break;
                     }
                     case 'scroll': {
@@ -676,7 +675,7 @@ view.View = class {
                     }
 
                     switch (this._host.environment('zoom')) {
-                        case 'd3': {
+                        case 'drag': {
                             const svgSize = canvasElement.getBoundingClientRect();
                             if (elements && elements.length > 0) {
                                 // Center view based on input elements
@@ -696,10 +695,10 @@ view.View = class {
                                 }
                                 const sx = (svgSize.width / (this._showHorizontal ? 4 : 2)) - x;
                                 const sy = (svgSize.height / (this._showHorizontal ? 2 : 4)) - y;
-                                this._zoom.transform(svg, d3.zoomIdentity.translate(sx, sy));
+                                this._zoom.transform(view.Zoom.identity().translate(sx, sy));
                             }
                             else {
-                                this._zoom.transform(svg, d3.zoomIdentity.translate((svgSize.width - viewGraph.graph().width) / 2, (svgSize.height - viewGraph.graph().height) / 2));
+                                this._zoom.transform(view.Zoom.identity().translate((svgSize.width - viewGraph.graph().width) / 2, (svgSize.height - viewGraph.graph().height) / 2));
                             }
                             break;
                         }
@@ -1939,6 +1938,659 @@ view.Error = class extends Error {
         this.name = 'Error loading model.';
         this.telemetry = telemetry;
         this.stack = undefined;
+    }
+};
+
+view.Selection = class {
+
+    constructor(node) {
+        this._node = node;
+    }
+
+    property(name, value) {
+        if (this._node) {
+            this._node[name] = value;
+        }
+        return this;
+    }
+
+    get node() {
+        return this._node;
+    }
+
+    each(callback) {
+        if (this._node) {
+            callback(this._node);
+        }
+        return this;
+    }
+
+    on(typename, value, options) {
+        function parseTypenames(typenames) {
+            return typenames.trim().split(/^|\s+/).map(function(t) {
+                var name = '', i = t.indexOf('.');
+                if (i >= 0) name = t.slice(i + 1), t = t.slice(0, i);
+                return {type: t, name: name};
+            });
+        }
+        var typenames = parseTypenames(typename + ''), i, n = typenames.length, t;
+        if (arguments.length < 2) {
+            var on = this.node.__on;
+            if (on) for (var j = 0, m = on.length, o; j < m; ++j) {
+                for (i = 0, o = on[j]; i < n; ++i) {
+                    if ((t = typenames[i]).type === o.type && t.name === o.name) {
+                        return o.value;
+                    }
+                }
+            }
+            return;
+        }
+        function onRemove(typename) {
+            return function(node) {
+                var on = node.__on;
+                if (on) {
+                    for (var j = 0, i = -1, m = on.length, o; j < m; ++j) {
+                        if (o = on[j], (!typename.type || o.type === typename.type) && o.name === typename.name) {
+                            node.removeEventListener(o.type, o.listener, o.options);
+                        }
+                        else {
+                            on[++i] = o;
+                        }
+                    }
+                    if (++i) {
+                        on.length = i;
+                    }
+                    else {
+                        delete node.__on;
+                    }
+                }
+            };
+        }
+        function onAdd(typename, value, options) {
+            return function(node) {
+                const contextListener = function(listener) {
+                    return function(event) {
+                        listener.call(node, event);
+                    };
+                };
+                var on = node.__on, o, listener = contextListener(value);
+                if (on) for (var j = 0, m = on.length; j < m; ++j) {
+                    if ((o = on[j]).type === typename.type && o.name === typename.name) {
+                        node.removeEventListener(o.type, o.listener, o.options);
+                        node.addEventListener(o.type, o.listener = listener, o.options = options);
+                        o.value = value;
+                        return;
+                    }
+                }
+                node.addEventListener(typename.type, listener, options);
+                o = { type: typename.type, name: typename.name, value: value, listener: listener, options: options };
+                if (!on) {
+                    node.__on = [o];
+                }
+                else {
+                    on.push(o);
+                }
+            };
+        }
+        on = value ? onAdd : onRemove;
+        for (i = 0; i < n; ++i) {
+            this.each(on(typenames[i], value, options));
+        }
+        return this;
+    }
+
+    filter(match) {
+        if (this._node && match(this._node)) {
+            return this;
+        }
+        return new view.Selection(null);
+    }
+
+    style(name, value, priority) {
+        if (this._node) {
+            this._node.style.setProperty(name, value, priority == null ? '' : priority);
+        }
+        return this;
+    }
+};
+
+view.Dispatch = class {
+
+    constructor(events) {
+        this._events = new Map(events.map((name) => [ name, [] ]));
+    }
+
+    on(typename, callback) {
+        function get$1(type, name) {
+            for (var i = 0, n = type.length, c; i < n; ++i) {
+                if ((c = type[i]).name === name) {
+                    return c.value;
+                }
+            }
+        }
+        function parseTypenames(typenames, events) {
+            return typenames.trim().split(/^|\s+/).map(function(t) {
+                var name = '', i = t.indexOf('.');
+                if (i >= 0) name = t.slice(i + 1), t = t.slice(0, i);
+                if (t && !events.has(t)) {
+                    throw new Error('unknown type: ' + t);
+                }
+                return {type: t, name: name};
+            });
+        }
+        var events = this._events,
+            T = parseTypenames(typename + '', events),
+            t,
+            i = -1,
+            n = T.length;
+        if (arguments.length < 2) {
+            while (++i < n) {
+                if ((t = (typename = T[i]).type) && (t = get$1(events.get(t), typename.name))) {
+                    return t;
+                }
+            }
+            return;
+        }
+        // If a type was specified, set the callback for the given type and name.
+        // Otherwise, if a null callback was specified, remove callbacks of the given name.
+        if (callback != null && typeof callback !== 'function') {
+            throw new Error('invalid callback: ' + callback);
+        }
+        function set$1(type, name, callback) {
+            for (var i = 0, n = type.length; i < n; ++i) {
+                if (type[i].name === name) {
+                    type[i] = { value: () => {} };
+                    type = type.slice(0, i).concat(type.slice(i + 1));
+                    break;
+                }
+            }
+            if (callback != null) {
+                type.push({name: name, value: callback});
+            }
+            return type;
+        }
+        while (++i < n) {
+            t = (typename = T[i]).type;
+            if (t) {
+                events.set(t, set$1(events.get(t), typename.name, callback));
+            }
+            else if (callback == null) {
+                if (events.has(t)) {
+                    events.set(t, set$1(events.get(t), typename.name, null));
+                }
+            }
+        }
+        return this;
+    }
+
+    call(type, node) {
+        const n = arguments.length - 2;
+        const args = new Array(n > 0 ? n : 0);
+        if (n > 0) {
+            for (let i = 0; i < n; ++i) {
+                args[i] = arguments[i + 2];
+            }
+        }
+        if (!this._events.has(type)) {
+            throw new Error('unknown type: ' + type);
+        }
+        const entries = this._events.get(type);
+        for (const entry of entries) {
+            entry.value.apply(node, args);
+        }
+    }
+};
+
+view.ZoomEvent = function(type, sourceEvent, target, transform, dispatch) {
+    Object.defineProperties(this, {
+        type: { value: type, enumerable: true, configurable: true },
+        sourceEvent: { value: sourceEvent, enumerable: true, configurable: true },
+        target: { value: target, enumerable: true, configurable: true },
+        transform: { value: transform, enumerable: true, configurable: true },
+        _: { value: dispatch }
+    });
+};
+
+view.Transform = class {
+
+    constructor(k, x, y) {
+        this.k = k;
+        this.x = x;
+        this.y = y;
+    }
+
+    translate(x, y) {
+        return x === 0 & y === 0 ? this : new view.Transform(this.k, this.x + this.k * x, this.y + this.k * y);
+    }
+
+    invert(location) {
+        return [(location[0] - this.x) / this.k, (location[1] - this.y) / this.k];
+    }
+
+    invertX(x) {
+        return (x - this.x) / this.k;
+    }
+
+    invertY(y) {
+        return (y - this.y) / this.k;
+    }
+
+    toString() {
+        return 'translate(' + this.x + ',' + this.y + ') scale(' + this.k + ')';
+    }
+};
+
+view.Zoom = class {
+
+    constructor(selection) {
+        this._scaleExtent = [0, Infinity];
+        this._translateExtent = [[-Infinity, -Infinity], [Infinity, Infinity]],
+        this._touchStarting = false;
+        this._touchFirst = false;
+        this._touchEnding = false;
+        this._touchDelay = 500;
+        this._wheelDelay = 150;
+        this._clickDistance2 = 0;
+        this._tapDistance = 10;
+        this._dispatch = new view.Dispatch([ 'start', 'zoom', 'end' ]),
+        this._selection = selection;
+        this._selection
+            .property('__zoom', view.Zoom.identity())
+            .on('wheel.zoom', (event, ...args) => this.wheeled(event, ...args), {passive: false})
+            .on('mousedown.zoom', (event, ...args) => this.mousedowned(event, ...args))
+            .filter((node) => navigator.maxTouchPoints || node.ontouchstart)
+            .on('touchstart.zoom', (event, ...args) => this.touchstarted(event, ...args))
+            .on('touchmove.zoom', (event, ...args) => this.touchmoved(event, ...args))
+            .on('touchend.zoom touchcancel.zoom', (event, ...args) => this.touchended(event, ...args))
+            .style('-webkit-tap-highlight-color', 'rgba(0,0,0,0)');
+    }
+
+    static identity() {
+        view.Zoom._identity = view.Zoom._identity || new view.Transform(1, 0, 0);
+        return view.Zoom._identity;
+    }
+
+    transform(transform, event) {
+        const node = this._selection.node;
+        if (node) {
+            this.gesture(node, arguments)
+                .event(event)
+                .start()
+                .zoom(null, typeof transform === 'function' ? transform() : transform)
+                .end();
+        }
+    }
+
+    scaleTo(k) {
+        const node = this._selection.node;
+        if (node) {
+            this.transform(() => {
+                const e = this.defaultExtent(node);
+                const t0 = node.__zoom;
+                const p0 = this.centroid(e);
+                const p1 = t0.invert(p0);
+                const k1 = typeof k === 'function' ? k() : k;
+                const transform = this.translate(this.scale(t0, k1), p0, p1);
+                return this.defaultConstrain(transform, e, this._translateExtent);
+            });
+        }
+    }
+
+    scaleBy(k) {
+        const node = this._selection.node;
+        if (node) {
+            this.scaleTo(() => {
+                const k0 = node.__zoom.k;
+                const k1 = k;
+                return k0 * k1;
+            });
+        }
+    }
+
+    scaleExtent(min, max) {
+        this._scaleExtent[0] = +min;
+        this._scaleExtent[1] = +max;
+    }
+
+    on() {
+        const value = this._dispatch.on.apply(this._dispatch, arguments);
+        return value === this._dispatch ? this : value;
+    }
+
+    pointer(event, node) {
+        while (event.sourceEvent) {
+            event = event.sourceEvent;
+        }
+        if (node === undefined) {
+            node = event.currentTarget;
+        }
+        if (node) {
+            var svg = node.ownerSVGElement || node;
+            if (svg.createSVGPoint) {
+                var point = svg.createSVGPoint();
+                point.x = event.clientX, point.y = event.clientY;
+                point = point.matrixTransform(node.getScreenCTM().inverse());
+                return [point.x, point.y];
+            }
+            if (node.getBoundingClientRect) {
+                var rect = node.getBoundingClientRect();
+                return [event.clientX - rect.left - node.clientLeft, event.clientY - rect.top - node.clientTop];
+            }
+        }
+        return [event.pageX, event.pageY];
+    }
+
+    defaultFilter(event) {
+        return (!event.ctrlKey || event.type === 'wheel') && !event.button;
+    }
+
+    defaultExtent(node) {
+        var e = node;
+        if (e instanceof SVGElement) {
+            e = e.ownerSVGElement || e;
+            if (e.hasAttribute('viewBox')) {
+                e = e.viewBox.baseVal;
+                return [[e.x, e.y], [e.x + e.width, e.y + e.height]];
+            }
+            return [[0, 0], [e.width.baseVal.value, e.height.baseVal.value]];
+        }
+        return [[0, 0], [e.clientWidth, e.clientHeight]];
+    }
+
+    defaultWheelDelta(event) {
+        return -event.deltaY * (event.deltaMode === 1 ? 0.05 : event.deltaMode ? 1 : 0.002) * (event.ctrlKey ? 10 : 1);
+    }
+
+    defaultConstrain(transform, extent, translateExtent) {
+        var dx0 = transform.invertX(extent[0][0]) - translateExtent[0][0],
+            dx1 = transform.invertX(extent[1][0]) - translateExtent[1][0],
+            dy0 = transform.invertY(extent[0][1]) - translateExtent[0][1],
+            dy1 = transform.invertY(extent[1][1]) - translateExtent[1][1];
+        return transform.translate(
+            dx1 > dx0 ? (dx0 + dx1) / 2 : Math.min(0, dx0) || Math.max(0, dx1),
+            dy1 > dy0 ? (dy0 + dy1) / 2 : Math.min(0, dy0) || Math.max(0, dy1)
+        );
+    }
+
+    scale(transform, k) {
+        k = Math.max(this._scaleExtent[0], Math.min(this._scaleExtent[1], k));
+        return k === transform.k ? transform : new view.Transform(k, transform.x, transform.y);
+    }
+
+    translate(transform, p0, p1) {
+        const x = p0[0] - p1[0] * transform.k, y = p0[1] - p1[1] * transform.k;
+        return x === transform.x && y === transform.y ? transform : new view.Transform(transform.k, x, y);
+    }
+
+    centroid(extent) {
+        return [(+extent[0][0] + +extent[1][0]) / 2, (+extent[0][1] + +extent[1][1]) / 2];
+    }
+
+    gesture(node, clean) {
+        return (!clean && node.__zooming) || new view.Gesture(node, this, this._dispatch);
+    }
+
+    noevent(event) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+    }
+
+    wheeled(event) {
+        const currentTarget = event.currentTarget;
+        if (this.defaultFilter(event)) {
+            var g = this.gesture(currentTarget).event(event),
+                t = currentTarget.__zoom,
+                k = Math.max(this._scaleExtent[0], Math.min(this._scaleExtent[1], t.k * Math.pow(2, this.defaultWheelDelta.apply(currentTarget, arguments)))),
+                p = this.pointer(event);
+            if (g.wheel) {
+                if (g.mouse[0][0] !== p[0] || g.mouse[0][1] !== p[1]) {
+                    g.mouse[1] = t.invert(g.mouse[0] = p);
+                }
+                clearTimeout(g.wheel);
+            }
+            else if (t.k === k) {
+                return;
+            }
+            else {
+                g.mouse = [p, t.invert(p)];
+                // interrupt(this);
+                g.start();
+            }
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            g.wheel = setTimeout(wheelidled, this._wheelDelay);
+            const transform = this.translate(this.scale(t, k), g.mouse[0], g.mouse[1]);
+            g.zoom('mouse', this.defaultConstrain(transform, g.extent, this._translateExtent));
+        }
+        function wheelidled() {
+            g.wheel = null;
+            g.end();
+        }
+    }
+
+    mousedowned(event) {
+        const currentTarget = event.currentTarget;
+        if (this._touchEnding || !this.defaultFilter(event)) return;
+        var g = this.gesture(currentTarget, true).event(event);
+        const v = new view.Selection(event.view)
+            .on('mousemove.zoom', (e) => mousemoved(e), true)
+            .on('mouseup.zoom', (e) => mouseupped(e), true);
+        const p = this.pointer(event, currentTarget);
+        const x0 = event.clientX;
+        const y0 = event.clientY;
+        const root = event.view.document.documentElement;
+        const selection = new view.Selection(event.view);
+        selection.on('dragstart.drag', (e) => this.noevent(e), { capture: true, passive: false });
+        if ('onselectstart' in root) {
+            selection.on('selectstart.drag', (e) => this.noevent(e), { capture: true, passive: false });
+        }
+        else {
+            root.__noselect = root.style.MozUserSelect;
+            root.style.MozUserSelect = 'none';
+        }
+        event.stopImmediatePropagation();
+        g.mouse = [ p, currentTarget.__zoom.invert(p) ];
+        g.start();
+        const mousemoved = (event) => {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            if (!g.moved) {
+                var dx = event.clientX - x0, dy = event.clientY - y0;
+                g.moved = dx * dx + dy * dy > this._clickDistance2;
+            }
+            const transform = this.translate(g.node.__zoom, g.mouse[0] = this.pointer(event, currentTarget), g.mouse[1]);
+            g.event(event).zoom('mouse', this.defaultConstrain(transform, g.extent, this._translateExtent));
+        };
+        const mouseupped = (event) => {
+            v.on('mousemove.zoom mouseup.zoom', null);
+            const root = event.view.document.documentElement;
+            const selection = new view.Selection(event.view).on('dragstart.drag', null);
+            if (g.moved) {
+                selection.on('click.drag', (e) => this.noevent(e), { capture: true, passive: false });
+                setTimeout(function() { selection.on('click.drag', null); }, 0);
+            }
+            if ('onselectstart' in root) {
+                selection.on('selectstart.drag', null);
+            }
+            else {
+                root.style.MozUserSelect = root.__noselect;
+                delete root.__noselect;
+            }
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            g.event(event).end();
+        };
+    }
+
+    touchstarted(event) {
+        const currentTarget = event.currentTarget;
+        if (this.defaultFilter(event)) {
+            const touches = event.touches;
+            const gesture = this.gesture(currentTarget, event.changedTouches.length === touches.length);
+            gesture.event(event);
+            let started;
+            let p;
+            event.stopImmediatePropagation();
+            for (let i = 0; i < touches.length; ++i) {
+                const t = touches[i];
+                p = this.pointer(t, currentTarget);
+                p = [p, currentTarget.__zoom.invert(p), t.identifier];
+                if (!gesture.touch0) {
+                    gesture.touch0 = p;
+                    started = true;
+                    gesture.taps = 1 + !!this._touchStarting;
+                }
+                else if (!gesture.touch1 && gesture.touch0[2] !== p[2]) {
+                    gesture.touch1 = p;
+                    gesture.taps = 0;
+                }
+            }
+            if (this._touchStarting) {
+                this._touchStarting = clearTimeout(this._touchStarting);
+            }
+            if (started) {
+                if (gesture.taps < 2) {
+                    this._touchFirst = p[0];
+                    this._touchStarting = setTimeout(function() { this._touchStarting = null; }, this._touchDelay);
+                }
+                gesture.start();
+            }
+        }
+    }
+
+    touchmoved(event) {
+        const currentTarget = event.currentTarget;
+        if (!currentTarget.__zooming) return;
+        const gesture = this.gesture(currentTarget).event(event);
+        const touches = event.changedTouches;
+        let t, p, l;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        for (let i = 0; i < touches.length; i++) {
+            t = touches[i], p = this.pointer(t, currentTarget);
+            if (gesture.touch0 && gesture.touch0[2] === t.identifier) {
+                gesture.touch0[0] = p;
+            }
+            else if (gesture.touch1 && gesture.touch1[2] === t.identifier) {
+                gesture.touch1[0] = p;
+            }
+        }
+        t = gesture.node.__zoom;
+        if (gesture.touch1) {
+            var p0 = gesture.touch0[0], l0 = gesture.touch0[1],
+                p1 = gesture.touch1[0], l1 = gesture.touch1[1],
+                dp = (dp = p1[0] - p0[0]) * dp + (dp = p1[1] - p0[1]) * dp,
+                dl = (dl = l1[0] - l0[0]) * dl + (dl = l1[1] - l0[1]) * dl;
+            t = this.scale(t, Math.sqrt(dp / dl));
+            p = [(p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2];
+            l = [(l0[0] + l1[0]) / 2, (l0[1] + l1[1]) / 2];
+        }
+        else if (gesture.touch0) {
+            p = gesture.touch0[0], l = gesture.touch0[1];
+        }
+        else {
+            return;
+        }
+        const transform = this.translate(t, p, l);
+        gesture.zoom('touch', this.defaultConstrain(transform, gesture.extent, this._translateExtent));
+    }
+
+    touchended(event) {
+        const currentTarget = event.currentTarget;
+        if (!currentTarget.__zooming) return;
+        const g = this.gesture(currentTarget).event(event);
+        const touches = event.changedTouches;
+        let t;
+        event.stopImmediatePropagation();
+        if (this._touchEnding) {
+            clearTimeout(this._touchEnding);
+        }
+        this._touchEnding = setTimeout(function() { this._touchEnding = null; }, this._touchDelay);
+        for (let i = 0; i < touches.length; i++) {
+            t = touches[i];
+            if (g.touch0 && g.touch0[2] === t.identifier) {
+                delete g.touch0;
+            }
+            else if (g.touch1 && g.touch1[2] === t.identifier) {
+                delete g.touch1;
+            }
+        }
+        if (g.touch1 && !g.touch0) {
+            g.touch0 = g.touch1;
+            delete g.touch1;
+        }
+        if (g.touch0) {
+            g.touch0[1] = currentTarget.__zoom.invert(g.touch0[0]);
+        }
+        else {
+            g.end();
+            if (g.taps === 2) {
+                t = this.pointer(t, currentTarget);
+                if (Math.hypot(this._touchFirst[0] - t[0], this._touchFirst[1] - t[1]) < this._tapDistance) {
+                    var p = new view.Selection(currentTarget)
+                        .on('dblclick.zoom');
+                    if (p) {
+                        p.apply(currentTarget, arguments);
+                    }
+                }
+            }
+        }
+    }
+};
+
+view.Gesture = class {
+
+    constructor(node, target, dispatch) {
+        this.node = node;
+        this.active = 0;
+        this.sourceEvent = null;
+        this.extent = target.defaultExtent(node);
+        this.taps = 0;
+        this.target = target;
+        this.dispatch = dispatch;
+    }
+
+    event(event) {
+        if (event) {
+            this.sourceEvent = event;
+        }
+        return this;
+    }
+
+    start() {
+        if (++this.active === 1) {
+            this.node.__zooming = this;
+            this.emit('start');
+        }
+        return this;
+    }
+
+    zoom(key, transform) {
+        if (this.mouse && key !== 'mouse') {
+            this.mouse[1] = transform.invert(this.mouse[0]);
+        }
+        if (this.touch0 && key !== 'touch') {
+            this.touch0[1] = transform.invert(this.touch0[0]);
+        }
+        if (this.touch1 && key !== 'touch') {
+            this.touch1[1] = transform.invert(this.touch1[0]);
+        }
+        this.node.__zoom = transform;
+        this.emit('zoom');
+        return this;
+    }
+
+    end() {
+        if (--this.active === 0) {
+            delete this.node.__zooming;
+            this.emit('end');
+        }
+        return this;
+    }
+
+    emit(type) {
+        const event = new view.ZoomEvent(type, this.sourceEvent, this.target, this.node.__zoom, this.dispatch);
+        this.dispatch.call(type, this.node, event);
     }
 };
 
